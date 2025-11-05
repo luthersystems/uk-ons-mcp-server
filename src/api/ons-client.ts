@@ -158,11 +158,20 @@ export class ONSApiClient {
       // If using 'latest' and getting a 500 error, fall back to version '6'
       // This is a workaround for ONS API issues where 'latest' (version 63) returns 500 errors
       // but version 6 works reliably for cpih01 and other datasets
-      if (version === 'latest' && error.response?.status === 500) {
+      // Check both axios error format and our interceptor error format
+      const is500Error = error.response?.status === 500 || 
+                        (error.message && error.message.includes('Server error') && error.message.includes('500'));
+      
+      if (version === 'latest' && is500Error) {
         console.warn(`ONS API returned 500 for version 'latest', falling back to version '6'`);
-        const fallbackUrl = `/datasets/${datasetId}/editions/${edition}/versions/6/observations?${dimensionParams}`;
-        const fallbackResponse = await this.client.get(fallbackUrl);
-        return fallbackResponse.data;
+        try {
+          const fallbackUrl = `/datasets/${datasetId}/editions/${edition}/versions/6/observations?${dimensionParams}`;
+          const fallbackResponse = await this.client.get(fallbackUrl);
+          return fallbackResponse.data;
+        } catch (fallbackError: any) {
+          // If fallback also fails, throw the original error
+          throw error;
+        }
       }
       // Re-throw the error if it's not a 500 or not using 'latest'
       throw error;
