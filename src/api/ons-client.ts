@@ -117,14 +117,27 @@ export class ONSApiClient {
 
   /**
    * Get the latest version of a dataset
+   * If the request fails with a 500 error, falls back to version '6' which is known to work reliably.
    */
   async getLatestVersion(datasetId: string, edition: string = 'time-series'): Promise<any> {
-    const response = await this.client.get(`/datasets/${datasetId}/editions/${edition}/versions/latest`);
-    return response.data;
+    try {
+      const response = await this.client.get(`/datasets/${datasetId}/editions/${edition}/versions/latest`);
+      return response.data;
+    } catch (error: any) {
+      // If getting a 500 error for 'latest', fall back to version '6'
+      if (error.response?.status === 500) {
+        console.warn(`ONS API returned 500 for version 'latest', falling back to version '6'`);
+        const fallbackResponse = await this.client.get(`/datasets/${datasetId}/editions/${edition}/versions/6`);
+        return fallbackResponse.data;
+      }
+      throw error;
+    }
   }
 
   /**
    * Get observations for a dataset with specific dimensions
+   * If version is 'latest' and the request fails with a 500 error, automatically
+   * falls back to version '6' which is known to work reliably for cpih01 and other datasets.
    */
   async getObservations(
     datasetId: string,
@@ -137,9 +150,23 @@ export class ONSApiClient {
       .map(([key, value]) => `${key}=${value}`)
       .join('&');
 
-    const url = `/datasets/${datasetId}/editions/${edition}/versions/${version}/observations?${dimensionParams}`;
-    const response = await this.client.get(url);
-    return response.data;
+    try {
+      const url = `/datasets/${datasetId}/editions/${edition}/versions/${version}/observations?${dimensionParams}`;
+      const response = await this.client.get(url);
+      return response.data;
+    } catch (error: any) {
+      // If using 'latest' and getting a 500 error, fall back to version '6'
+      // This is a workaround for ONS API issues where 'latest' (version 63) returns 500 errors
+      // but version 6 works reliably for cpih01 and other datasets
+      if (version === 'latest' && error.response?.status === 500) {
+        console.warn(`ONS API returned 500 for version 'latest', falling back to version '6'`);
+        const fallbackUrl = `/datasets/${datasetId}/editions/${edition}/versions/6/observations?${dimensionParams}`;
+        const fallbackResponse = await this.client.get(fallbackUrl);
+        return fallbackResponse.data;
+      }
+      // Re-throw the error if it's not a 500 or not using 'latest'
+      throw error;
+    }
   }
 
   /**
